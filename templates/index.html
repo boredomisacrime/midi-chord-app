@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>MIDI Chord Helper</title>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <style>
+    :root {
+      --bg:           #0d0d1a;
+      --card:         #13132a;
+      --card2:        #0d0d20;
+      --border:       #252540;
+      --accent:       #7c3aed;
+      --accent-dim:   rgba(124, 58, 237, 0.15);
+      --green:        #10b981;
+      --green-dark:   #059669;
+      --text:         #e2e2f0;
+      --muted:        #5a5a80;
+      --error:        #f87171;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, sans-serif;
+      min-height: 100vh;
+      padding: 24px 20px 60px;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+
+    /* ── Header ── */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 28px;
+    }
+    .header h1 { font-size: 1.6rem; font-weight: 800; letter-spacing: -0.02em; }
+    .header h1 span { color: var(--accent); }
+    .status-pill {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 6px 14px;
+      font-size: 0.8rem;
+      color: var(--muted);
+      transition: all 0.3s;
+    }
+    .status-pill.connected { color: var(--green); border-color: var(--green-dark); }
+    .dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+      transition: background 0.3s;
+      flex-shrink: 0;
+    }
+    .status-pill.connected .dot { background: var(--green); }
+
+    /* ── Cards ── */
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 22px;
+      margin-bottom: 14px;
+    }
+    .card-label {
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--muted);
+      margin-bottom: 14px;
+    }
+
+    /* ── Connect ── */
+    .connect-row { display: flex; gap: 10px; align-items: stretch; }
+    select {
+      flex: 1;
+      background: var(--card2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      padding: 10px 14px;
+      font-size: 0.9rem;
+      outline: none;
+      cursor: pointer;
+      -webkit-appearance: none;
+    }
+    select:focus { border-color: var(--accent); }
+    button {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 9px;
+      padding: 10px 22px;
+      font-size: 0.9rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: opacity 0.15s, transform 0.1s;
+      white-space: nowrap;
+    }
+    button:hover:not(:disabled) { opacity: 0.85; }
+    button:active:not(:disabled) { transform: scale(0.96); }
+    button:disabled { opacity: 0.35; cursor: not-allowed; }
+    button.ghost {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--muted);
+    }
+    button.ghost:hover:not(:disabled) { border-color: var(--text); color: var(--text); opacity: 1; }
+    button.rec-btn {
+      background: var(--green);
+      font-size: 1rem;
+      padding: 12px 28px;
+    }
+    button.rec-btn.recording {
+      background: #dc2626;
+      animation: pulse-btn 1.4s ease-in-out infinite;
+    }
+    @keyframes pulse-btn {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.75; }
+    }
+
+    /* ── Piano ── */
+    .piano-scroll { overflow-x: auto; padding: 4px 0 24px; }
+    .piano-wrap {
+      position: relative;
+      display: inline-block;
+      height: 150px;
+    }
+    .key {
+      position: absolute;
+      top: 0;
+      border-radius: 0 0 6px 6px;
+      cursor: default;
+      transition: background 0.06s;
+    }
+    .wkey {
+      background: #f0ecff;
+      border: 1px solid #c8c0e0;
+      z-index: 1;
+    }
+    .wkey.active { background: var(--green); border-color: var(--green-dark); }
+    .bkey {
+      background: #18182e;
+      border: 1px solid #000;
+      z-index: 2;
+    }
+    .bkey.active { background: var(--green-dark); }
+    .key-lbl {
+      position: absolute;
+      bottom: 6px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 0.6rem;
+      color: var(--muted);
+      pointer-events: none;
+      white-space: nowrap;
+    }
+    .wkey.active .key-lbl { color: #fff; }
+
+    /* ── Live chord display ── */
+    .live-chord {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 8px 0 4px;
+      min-height: 100px;
+      justify-content: center;
+    }
+    .chord-big {
+      font-size: 3.8rem;
+      font-weight: 900;
+      color: var(--green);
+      line-height: 1;
+      letter-spacing: -0.02em;
+      min-height: 60px;
+      text-align: center;
+      transition: color 0.1s;
+    }
+    .notes-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      justify-content: center;
+      margin-top: 12px;
+      min-height: 32px;
+    }
+    .nbadge {
+      background: var(--accent-dim);
+      border: 1px solid var(--accent);
+      color: var(--accent);
+      border-radius: 20px;
+      padding: 3px 13px;
+      font-size: 0.82rem;
+      font-weight: 700;
+      animation: pop 0.12s ease;
+    }
+    @keyframes pop {
+      from { transform: scale(0.75); opacity: 0; }
+      to   { transform: scale(1);    opacity: 1; }
+    }
+
+    /* ── Recorder ── */
+    .rec-hint {
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin-bottom: 16px;
+      line-height: 1.5;
+    }
+    .rec-hint strong { color: var(--text); }
+    .rec-controls { display: flex; gap: 10px; margin-bottom: 18px; }
+    .slots {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+      gap: 10px;
+    }
+    .slot {
+      background: var(--card2);
+      border: 2px dashed var(--border);
+      border-radius: 10px;
+      padding: 14px 6px;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 86px;
+      transition: all 0.25s;
+    }
+    .slot.filled {
+      border-style: solid;
+      border-color: var(--accent);
+      background: var(--accent-dim);
+    }
+    .slot.waiting {
+      border-style: solid;
+      border-color: #dc2626;
+      background: rgba(220, 38, 38, 0.1);
+      animation: pulse-slot 1.4s ease-in-out infinite;
+    }
+    @keyframes pulse-slot {
+      0%, 100% { border-color: #dc2626; }
+      50%       { border-color: rgba(220,38,38,0.3); }
+    }
+    .slot-n  { font-size: 0.7rem; color: var(--muted); }
+    .slot-ch { font-size: 1.25rem; font-weight: 800; color: var(--accent); margin: 2px 0; }
+    .slot-notes { font-size: 0.66rem; color: var(--muted); }
+    .rec-status {
+      font-size: 0.82rem;
+      color: #dc2626;
+      margin-top: 8px;
+      min-height: 18px;
+      font-weight: 600;
+      display: none;
+    }
+    .rec-status.visible { display: block; }
+    .err-msg { color: var(--error); font-size: 0.82rem; margin-top: 8px; min-height: 18px; }
+
+    /* ── Analysis ── */
+    .analysis-panel { display: none; }
+    .analysis-panel.visible {
+      display: block;
+      animation: rise 0.45s ease;
+    }
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(12px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .key-name {
+      font-size: 2.2rem;
+      font-weight: 900;
+      color: var(--accent);
+      letter-spacing: -0.02em;
+      margin: 6px 0 16px;
+    }
+    .section-label {
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--muted);
+      margin-bottom: 10px;
+      margin-top: 20px;
+    }
+    .scale-row { display: flex; flex-wrap: wrap; gap: 8px; }
+    .scale-chip {
+      background: var(--accent-dim);
+      border: 1px solid var(--accent);
+      color: var(--accent);
+      border-radius: 7px;
+      padding: 6px 14px;
+      font-size: 0.85rem;
+      font-weight: 700;
+    }
+    .chord-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+      gap: 10px;
+    }
+    .ccard {
+      background: var(--card2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 13px 8px;
+      text-align: center;
+    }
+    .ccard-name { font-size: 1.1rem; font-weight: 800; }
+    .ccard-deg  { font-size: 0.72rem; color: var(--muted); margin-top: 2px; }
+    .extra-list { display: flex; flex-direction: column; gap: 8px; }
+    .extra-item {
+      background: var(--card2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 13px 16px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .extra-name { font-size: 1.1rem; font-weight: 800; color: var(--green); min-width: 58px; }
+    .extra-why  { font-size: 0.83rem; color: var(--muted); line-height: 1.4; }
+  </style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <h1>MIDI <span>Chord</span> Helper</h1>
+  <div class="status-pill" id="statusPill">
+    <span class="dot"></span>
+    <span id="statusText">Not connected</span>
+  </div>
+</div>
+
+<!-- Connect -->
+<div class="card">
+  <div class="card-label">MIDI Device</div>
+  <div class="connect-row">
+    <select id="portSelect">
+      <option value="">Choose your MIDI device...</option>
+      {% for port in ports %}
+      <option value="{{ port }}">{{ port }}</option>
+      {% endfor %}
+    </select>
+    <button id="connectBtn" onclick="connectMidi()">Connect</button>
+    <button class="ghost" onclick="refreshPorts()">Refresh</button>
+  </div>
+</div>
+
+<!-- Live piano + chord -->
+<div class="card">
+  <div class="card-label">Live Input</div>
+  <div class="piano-scroll">
+    <div class="piano-wrap" id="pianoWrap"></div>
+  </div>
+  <div class="live-chord">
+    <div class="chord-big" id="chordBig">—</div>
+    <div class="notes-row" id="notesRow"></div>
+  </div>
+</div>
+
+<!-- Recorder -->
+<div class="card">
+  <div class="card-label">Chord Recorder</div>
+  <p class="rec-hint">
+    Click <strong>Start Recording</strong>, play as many chords as you like —
+    lift all your fingers between each one and it captures automatically.
+    Hit <strong>Analyze</strong> whenever you're ready.
+  </p>
+  <div class="rec-controls">
+    <button class="rec-btn" id="recBtn" onclick="toggleRecording()" disabled>
+      Start Recording
+    </button>
+    <button id="analyzeBtn" onclick="analyze()" disabled style="background:#6d28d9;">
+      Analyze
+    </button>
+    <button class="ghost" onclick="clearAll()">Clear All</button>
+  </div>
+  <div class="rec-status" id="recStatus">Recording — play a chord, then lift your hands</div>
+  <div class="slots" id="slots"></div>
+  <div class="err-msg" id="errMsg"></div>
+</div>
+
+<!-- Analysis -->
+<div class="card analysis-panel" id="analysisPanel">
+  <div class="card-label">Analysis & Suggestions</div>
+  <div id="analysisBody"></div>
+</div>
+
+<script>
+// ── Piano builder ──────────────────────────────────────────────────────
+const MIDI_START = 48; // C3
+const MIDI_END   = 85; // C6 + 1 (exclusive)
+const WW = 38, BW = 24, WH = 150, BH = 92;
+const IS_WHITE = [true,false,true,false,true,true,false,true,false,true,false,true];
+
+function buildPiano() {
+  const wrap = document.getElementById('pianoWrap');
+  wrap.innerHTML = '';
+
+  let wi = 0;
+  const wx = {}; // midi -> left px of that white key
+
+  // Pass 1: white keys
+  for (let m = MIDI_START; m < MIDI_END; m++) {
+    if (!IS_WHITE[m % 12]) continue;
+    wx[m] = wi * WW;
+    const d = document.createElement('div');
+    d.className = 'key wkey';
+    d.id = `k${m}`;
+    d.style.cssText = `left:${wx[m]}px;width:${WW - 1}px;height:${WH}px;`;
+    if (m % 12 === 0) {
+      const lbl = document.createElement('span');
+      lbl.className = 'key-lbl';
+      lbl.textContent = `C${Math.floor(m / 12) - 1}`;
+      d.appendChild(lbl);
+    }
+    wrap.appendChild(d);
+    wi++;
+  }
+
+  // Pass 2: black keys
+  for (let m = MIDI_START; m < MIDI_END; m++) {
+    if (IS_WHITE[m % 12]) continue;
+    // find preceding white key
+    let prev = m - 1;
+    while (prev >= MIDI_START && !IS_WHITE[prev % 12]) prev--;
+    const x = (prev >= MIDI_START ? wx[prev] : -WW) + WW - Math.floor(BW / 2);
+    const d = document.createElement('div');
+    d.className = 'key bkey';
+    d.id = `k${m}`;
+    d.style.cssText = `left:${x}px;width:${BW}px;height:${BH}px;`;
+    wrap.appendChild(d);
+  }
+
+  wrap.style.width = wi * WW + 'px';
+}
+
+function highlightKeys(notes) {
+  document.querySelectorAll('.key.active').forEach(k => k.classList.remove('active'));
+  notes.forEach(m => {
+    const el = document.getElementById(`k${m}`);
+    if (el) el.classList.add('active');
+  });
+}
+
+// ── Socket.IO ──────────────────────────────────────────────────────────
+const socket = io();
+let isConnected = false;
+let isRecording = false;
+
+socket.on('status', d => {
+  isConnected = d.ok;
+  const pill = document.getElementById('statusPill');
+  pill.className = 'status-pill' + (d.ok ? ' connected' : '');
+  document.getElementById('statusText').textContent = d.msg;
+  document.getElementById('recBtn').disabled = !d.ok;
+});
+
+socket.on('ports', d => {
+  const sel = document.getElementById('portSelect');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">Choose your MIDI device...</option>';
+  d.ports.forEach(p => {
+    const o = document.createElement('option');
+    o.value = o.textContent = p;
+    if (p === cur) o.selected = true;
+    sel.appendChild(o);
+  });
+});
+
+socket.on('note_update', d => {
+  highlightKeys(d.notes);
+  const chord = d.chord || (d.notes.length === 1 ? d.names[0] : d.notes.length > 1 ? '...' : '—');
+  document.getElementById('chordBig').textContent = chord;
+  const row = document.getElementById('notesRow');
+  row.innerHTML = '';
+  d.names.forEach(n => {
+    const b = document.createElement('span');
+    b.className = 'nbadge';
+    b.textContent = n;
+    row.appendChild(b);
+  });
+});
+
+socket.on('captured', d => {
+  clearErr();
+  // Fill the just-captured slot
+  const slot = document.getElementById(`slot-${d.idx}`);
+  slot.className = 'slot filled';
+  slot.innerHTML = `
+    <div class="slot-n">Chord ${d.idx + 1}</div>
+    <div class="slot-ch">${d.chord}</div>
+    <div class="slot-notes">${d.notes.join(' · ')}</div>
+  `;
+  // Add a fresh empty slot ready for the next chord
+  addSlot(d.count);
+  setWaitingSlot(d.count);
+  document.getElementById('analyzeBtn').disabled = false;
+  document.getElementById('recStatus').textContent =
+    `Recording — ${d.count} chord${d.count > 1 ? 's' : ''} captured · keep going or hit Analyze`;
+});
+
+socket.on('capture_err', d => showErr(d.msg));
+
+socket.on('auto_capture_started', () => {
+  isRecording = true;
+  const btn = document.getElementById('recBtn');
+  btn.textContent = 'Stop Recording';
+  btn.classList.add('recording');
+  document.getElementById('recStatus').classList.add('visible');
+  // Ensure there's at least one slot waiting
+  const slots = document.getElementById('slots');
+  if (slots.children.length === 0) addSlot(0);
+  setWaitingSlot(capturedCount);
+});
+
+socket.on('auto_capture_stopped', () => {
+  isRecording = false;
+  const btn = document.getElementById('recBtn');
+  btn.textContent = 'Start Recording';
+  btn.classList.remove('recording');
+  document.getElementById('recStatus').classList.remove('visible');
+  clearWaitingSlots();
+});
+
+socket.on('analysis', d => renderAnalysis(d));
+
+socket.on('cleared', () => {
+  document.getElementById('slots').innerHTML = '';
+  capturedCount = 0;
+  document.getElementById('analysisPanel').className = 'card analysis-panel';
+  document.getElementById('analysisBody').innerHTML = '';
+  document.getElementById('analyzeBtn').disabled = true;
+  clearErr();
+  isRecording = false;
+  const btn = document.getElementById('recBtn');
+  btn.textContent = 'Start Recording';
+  btn.classList.remove('recording');
+  btn.disabled = !isConnected;
+  document.getElementById('recStatus').classList.remove('visible');
+});
+
+// ── Controls ───────────────────────────────────────────────────────────
+let capturedCount = 0;
+
+function addSlot(idx) {
+  const slots = document.getElementById('slots');
+  const div = document.createElement('div');
+  div.className = 'slot';
+  div.id = `slot-${idx}`;
+  div.innerHTML = `<span class="slot-n">Chord ${idx + 1}</span>`;
+  slots.appendChild(div);
+  capturedCount = idx;
+}
+
+function connectMidi() {
+  const port = document.getElementById('portSelect').value;
+  if (!port) { showErr('Please select a device from the list first'); return; }
+  socket.emit('connect_midi', { port });
+}
+
+function refreshPorts() { socket.emit('get_ports'); }
+
+function toggleRecording() {
+  if (isRecording) {
+    socket.emit('stop_auto_capture');
+  } else {
+    socket.emit('start_auto_capture');
+  }
+}
+
+function analyze() { socket.emit('analyze'); }
+function clearAll() { socket.emit('clear'); }
+
+function setWaitingSlot(idx) {
+  clearWaitingSlots();
+  const slot = document.getElementById(`slot-${idx}`);
+  if (slot && !slot.classList.contains('filled')) slot.classList.add('waiting');
+}
+
+function clearWaitingSlots() {
+  document.querySelectorAll('.slot.waiting').forEach(s => s.classList.remove('waiting'));
+}
+
+function showErr(msg) {
+  const el = document.getElementById('errMsg');
+  el.textContent = msg;
+  clearTimeout(el._t);
+  el._t = setTimeout(() => { el.textContent = ''; }, 4000);
+}
+function clearErr() { document.getElementById('errMsg').textContent = ''; }
+
+// ── Analysis render ────────────────────────────────────────────────────
+function renderAnalysis(d) {
+  const body = document.getElementById('analysisBody');
+  body.innerHTML = `
+    <div class="section-label">Detected Key</div>
+    <div class="key-name">${d.key}</div>
+
+    <div class="section-label">Scale Notes</div>
+    <div class="scale-row">
+      ${d.scale_notes.map(n => `<span class="scale-chip">${n}</span>`).join('')}
+    </div>
+
+    <div class="section-label">Chords That Fit (Diatonic)</div>
+    <div class="chord-grid">
+      ${d.diatonic_chords.map(c => `
+        <div class="ccard">
+          <div class="ccard-name">${c.chord || 'N/A'}</div>
+          <div class="ccard-deg">${c.degree}</div>
+        </div>
+      `).join('')}
+    </div>
+
+    <div class="section-label">Color Chords to Explore</div>
+    <div class="extra-list">
+      ${d.extra_chords.map(c => `
+        <div class="extra-item">
+          <div class="extra-name">${c.chord}</div>
+          <div class="extra-why">${c.why}</div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+  const panel = document.getElementById('analysisPanel');
+  panel.className = 'card analysis-panel visible';
+  setTimeout(() => panel.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
+}
+
+// ── Init ───────────────────────────────────────────────────────────────
+buildPiano();
+</script>
+</body>
+</html>
