@@ -2,6 +2,8 @@
 
 A local web app that listens to your MIDI piano in real time, identifies the chords you're playing, and suggests notes, scales, and chords that work well with your progression.
 
+![MIDI Chord Helper UI](screenshot.png)
+
 ## What it does
 
 - Lights up a piano keyboard on screen as you play
