@@ -18,18 +18,30 @@ A local web app that listens to your MIDI piano in real time, identifies the cho
 
 ## Requirements
 
-- Mac with Python 3 installed (comes pre-installed on macOS)
-- A MIDI piano connected via Bluetooth or USB — it just needs to show up in **Audio MIDI Setup** on your Mac
+- A Mac (Python 3 comes pre-installed — nothing to install)
+- A MIDI piano connected via Bluetooth or USB
 
-## How to run
+## Setup (first time only)
+
+**Step 1 — Download the app**
+
+Click the green **Code** button on this page → **Download ZIP**, then unzip it.
+
+**Step 2 — Run it**
+
+Open **Terminal** (press `Cmd + Space`, type Terminal, hit Enter), then drag the unzipped folder into the Terminal window and press Enter. Then type:
 
 ```bash
 bash run.sh
 ```
 
-Then open **http://localhost:5001** in your browser.
+The first run installs a few small Python packages automatically — this takes about 30 seconds and only happens once.
 
-That's it. The first run installs the dependencies automatically — after that it starts instantly.
+**Step 3 — Open in browser**
+
+Go to **http://localhost:5001**
+
+That's it. Every time after this, just open Terminal, go to the folder, and run `bash run.sh`.
 
 ## How to use
 
